@@ -4949,6 +4949,15 @@ fn null_for(view: &View, at: D3D12_CPU_DESCRIPTOR_HANDLE) {
         View::Placed(false, resource, _) if resource[0] == 1 => return null_buffer_view(at),
         // Textures: a null view of the title's dimension (1D, arrays, 3D,
         // cubes), not always 2D.
+        // Local experiment: the title's own null placeholder (no resource)
+        // names a 1D texture, and shaders read it as a 2D one (GPU-based
+        // validation: "Expected TEXTURE2D, In Descriptor TEXTURE1D", heap
+        // index 0). With VICTORY_NULL_1D_AS_2D such a slot gets a null 2D view.
+        View::Shader(0, Some(desc))
+            if desc[1] == 2 && std::env::var_os("VICTORY_NULL_1D_AS_2D").is_some() =>
+        {
+            return null_view(at);
+        }
         View::Shader(_, Some(desc)) => return null_like(desc, at),
         View::Placed(false, _, desc) => {
             return null_like(desc[..10].try_into().unwrap_or(&[0; 10]), at);
