@@ -86,3 +86,32 @@ pub(crate) fn skip(from: usize, to: usize, copy: u64) -> bool {
     }
     combined && mode == 2
 }
+
+/// `VICTORY_SKIP_WC_COMPARE=1` (with `VICTORY_SKIP_WC_BACK=1`), the second
+/// half of the experiment: the card does not hash or compare what shaders
+/// are declared to write in a big copy of write-combined title memory, since
+/// nothing of it is fetched back anyway. The CPU's changes still go up.
+/// fxceless/victory-fork#868 calls its form unsafe: one tester's RTX 5080
+/// lost its device 75 s into the world with it, cause unknown.
+pub(crate) fn uncompared(copy: u64, ranges: &[(usize, usize)]) -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let on = *ON.get_or_init(|| mode() == 2 && std::env::var_os("VICTORY_SKIP_WC_COMPARE").is_some_and(|v| v == "1"));
+    if !on || copy < least() || ranges.is_empty() {
+        return false;
+    }
+    let reservations = RESERVATIONS.lock().unwrap_or_else(|e| e.into_inner());
+    let all = ranges.iter().all(|&(from, to)| {
+        from < to
+            && reservations.range(..to).next_back().is_some_and(|(&base, &(len, protect))| {
+                base <= from && protect & WRITE_COMBINED != 0 && base.checked_add(len).is_some_and(|end| to <= end)
+            })
+    });
+    if all {
+        static LEFT_OUT: AtomicU64 = AtomicU64::new(0);
+        let n = LEFT_OUT.fetch_add(1, Relaxed) + 1;
+        if n.is_power_of_two() {
+            tracing::info!("VICTORY_SKIP_WC_COMPARE: {n} declared writes of write-combined memory left out of the card's compares so far");
+        }
+    }
+    all
+}

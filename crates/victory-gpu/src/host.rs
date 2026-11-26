@@ -4413,7 +4413,13 @@ impl Host {
             return None;
         }
         // The ranges this submission's shaders may write, per copy.
-        let declared: Vec<Declared> = declared.iter().filter(|(shadow, _)| shadow.carded()).cloned().collect();
+        let declared: Vec<Declared> = declared
+            .iter()
+            .filter(|(shadow, _)| shadow.carded())
+            // LOCAL experiment (`VICTORY_SKIP_WC_COMPARE=1`): see `wcback`.
+            .filter(|(shadow, ranges)| !crate::wcback::uncompared(shadow.span().1, ranges))
+            .cloned()
+            .collect();
         let declared = if crate::picked::lands() { crate::picked::with(declared, &picked.written) } else { declared };
         // (Of a copy with a declared range here, that says it.)
         let looked: Vec<&crate::picked::Range> =
