@@ -4837,6 +4837,12 @@ impl Host {
                         let (lo, hi) = r.shadow.card_piece(&r.span, p);
                         if lo < hi && !seen.contains(&(copy, lo, hi)) {
                             let key = (r.shadow.id(), r.shadow.span().0 as usize + lo, hi - lo);
+                            // Experiment: write-combined title memory keeps
+                            // what shaders wrote on the card only.
+                            if crate::wcback::skip(key.1, key.1 + key.2) {
+                                seen.insert((copy, lo, hi));
+                                continue;
+                            }
                             if fetch.as_ref().is_some_and(|f| f.had.holds(behind, key)) {
                                 land::count(land::stat::HAD, 1);
                                 land::count(land::stat::HAD_BYTES, (hi - lo) as u64);
@@ -5210,6 +5216,10 @@ impl Host {
                 }
                 let (lo, hi) = r.shadow.card_piece(&r.span, p);
                 if lo < hi && seen.insert((std::sync::Arc::as_ptr(&r.shadow) as usize, lo, hi)) {
+                    let title = r.shadow.span().0 as usize;
+                    if crate::wcback::skip(title + lo, title + hi) {
+                        continue;
+                    }
                     pieces.push((i, lo, hi, total));
                     total += (hi - lo) as u64;
                 }
