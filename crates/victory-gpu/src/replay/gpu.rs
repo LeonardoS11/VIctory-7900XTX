@@ -283,7 +283,8 @@ pub(super) fn to_desc(d: &wire::Desc) -> D3D12_RESOURCE_DESC {
             Quality: d.samples[1],
         },
         Layout: D3D12_TEXTURE_LAYOUT(d.layout),
-        Flags: D3D12_RESOURCE_FLAGS(d.flags),
+        // LOCAL: not cross-adapter: the replay's heaps are not shared ones.
+        Flags: D3D12_RESOURCE_FLAGS(d.flags & !0x10),
     }
 }
 
