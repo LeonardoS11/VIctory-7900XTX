@@ -50,6 +50,20 @@ pub fn run(
     if execute {
         check_cpu_features()?;
     }
+    // LOCAL: the Series S profile's memory pools are sized for its own render size (2/3 of 1920x1080). Above
+    // that the title runs out of them seconds in and stops at its out-of-memory `int3` (title+0x2219650;
+    // tried at 0.75, 0.85 and 1.0, RTX 5080, 2026-11-26; reported in fxceless/victory-fork#1379).
+    if execute
+        && matches!(console, Console::SeriesS)
+        && let Some(scale) = std::env::var("VICTORY_RENDER_SCALE").ok().and_then(|s| s.trim().parse::<f32>().ok())
+        && scale > 2.0 / 3.0 + 1e-3
+    {
+        anyhow::bail!(
+            "VICTORY_RENDER_SCALE={scale} with --console series-s: the title's Series S memory pools hold at most \
+             its own render size (0.6667, 1280x720). For a larger picture use --console series-x (2560x1440 \
+             without VICTORY_RENDER_SCALE)."
+        );
+    }
     // A title that relaunched itself: the old process must be gone first.
     victory_hle::modules::lifecycle::wait_for_previous();
     let cfg = victory_core::Config::load()?;

@@ -304,7 +304,12 @@ pub unsafe fn apply_asked(base: usize, size: usize) {
             asked.push((&POOL_CHECK, pool_check_code(), format!("{w}x{h}")));
         }
     }
-    if let Some(s) = asked_render_scale() {
+    // LOCAL: `hooks::resolution_levers` has written this place at load (the same variable, and the
+    // upscaler's maximum with it); a second write here only found changed bytes and said "another build?".
+    if let Some(s) = asked_render_scale()
+        // SAFETY: the caller's promise.
+        && unsafe { matches(base, size, &OWN_SCALE) } == Patched::Done
+    {
         asked.push((&OWN_SCALE, own_scale_code(s), format!("{s}")));
     }
     if let Some(s) = asked_ffx_scale() {
