@@ -888,6 +888,9 @@ impl Player {
                 (e, _) => {
                     if failed == 0 {
                         tracing::warn!("resource {} not made: {e:?}: {r:?}", r.id);
+                        if let Place::Placed { heap, .. } = r.place {
+                            tracing::warn!("its heap: {:?}", self.frame.heaps.iter().find(|h| h.id == heap));
+                        }
                     }
                     failed += 1;
                 }
