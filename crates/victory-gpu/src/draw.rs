@@ -3536,6 +3536,36 @@ impl State {
                 made.push((slot, first * 32));
                 continue;
             }
+            // LOCAL diagnostics (`VICTORY_TABLE_REPEATS=1`): how many of the
+            // tables made afresh were made with the same slots and contents
+            // before, by another list of this frame or in an earlier frame:
+            // what a cache of them across lists could save.
+            {
+                static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+                if *ON.get_or_init(|| std::env::var_os("VICTORY_TABLE_REPEATS").is_some_and(|v| v == "1")) {
+                    type Seen = std::collections::HashMap<(u64, u32, u64), u64>;
+                    static SEEN: std::sync::Mutex<Option<Seen>> = std::sync::Mutex::new(None);
+                    // Made, repeats of this frame, of the frame before, of older ones; slots made.
+                    static COUNTS: [AtomicU64; 5] = [const { AtomicU64::new(0) }; 5];
+                    let frame = crate::frame::current();
+                    let before = SEEN.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).insert(key, frame);
+                    let made = COUNTS[0].fetch_add(1, Ordering::Relaxed) + 1;
+                    COUNTS[4].fetch_add(u64::from(n), Ordering::Relaxed);
+                    match before {
+                        Some(f) if f == frame => COUNTS[1].fetch_add(1, Ordering::Relaxed),
+                        Some(f) if f + 1 == frame => COUNTS[2].fetch_add(1, Ordering::Relaxed),
+                        Some(_) => COUNTS[3].fetch_add(1, Ordering::Relaxed),
+                        None => 0,
+                    };
+                    if made.is_multiple_of(100_000) {
+                        let c: Vec<u64> = COUNTS.iter().map(|c| c.load(Ordering::Relaxed)).collect();
+                        tracing::info!(
+                            "tables made afresh: {} ({} slots); made the same before: {} by another list of the frame, {} in the frame before, {} earlier; {} new",
+                            c[0], c[4], c[1], c[2], c[3], c[0] - c[1] - c[2] - c[3]
+                        );
+                    }
+                }
+            }
             let Some(first) = host.dynamic(n) else {
                 // No room: the draw must not run with the title's own
                 // offsets (slots never made for it); `bind` drops it.
