@@ -3559,7 +3559,8 @@ impl State {
                             // SAFETY: a descriptor slot in title memory.
                             h.add(unsafe { ((table + u64::from(k) * 32) as *const [u32; 3]).read_unaligned() });
                         }
-                        (table, n, h.0)
+                        // (And wherever in its heap the title wrote the table.)
+                        (0u64, n, h.0)
                     };
                     let before = SEEN.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).insert(key, frame);
                     let made = COUNTS[0].fetch_add(1, Ordering::Relaxed) + 1;
