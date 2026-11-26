@@ -16,6 +16,8 @@ victory-core.workspace = true
 victory-formats.workspace = true
 victory-pipeline.workspace = true
 victory-shader = { workspace = true, features = ["host"] }
+# LOCAL: a faster allocator under the counting one (see copystat.rs); VICTORY_SYSTEM_HEAP=1 goes back.
+mimalloc = { version = "0.1", default-features = false }
 
 [build-dependencies]
 blake3.workspace = true
