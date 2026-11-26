@@ -952,7 +952,8 @@ pub(crate) fn upload_from(list: &HostList, resource: This, first: u32) {
 }
 
 /// Whether title textures are uploaded in the list's prelude at submission
-/// (`VICTORY_PRELUDE_UPLOAD=1`; off by default), from Belobug 5d6bd84. The
+/// (on by default; `VICTORY_PRELUDE_UPLOAD=0`: recorded by the list, as
+/// before), from Belobug 5d6bd84. The
 /// list then records no copy of its own: at submission the staging buffer
 /// is checked first, and only then is it known whether it changed, so a
 /// texture the title rewrote is shown in the same frame. Before, a list
@@ -962,7 +963,7 @@ pub(crate) fn upload_from(list: &HostList, resource: This, first: u32) {
 /// turn.
 pub(crate) fn prelude_upload() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("VICTORY_PRELUDE_UPLOAD").is_some_and(|v| v == "1"))
+    *ON.get_or_init(|| std::env::var_os("VICTORY_PRELUDE_UPLOAD").is_none_or(|v| v != "0"))
 }
 
 /// Whether a prelude uploads the staging buffer now: `Some(first upload)`
