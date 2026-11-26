@@ -199,6 +199,37 @@ thread_local! {
     pub(crate) static CONSTANTS_RAW_HERE: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
 }
 
+/// LOCAL: on a host without raw twins (a view heap capped at 1,000,000 views: NVIDIA) and with
+/// [`constants_raw`], a table's constant buffer is read as raw bytes through its own slot: the
+/// tables that hold constant buffers are made afresh for the draw anyway, so the host puts a raw
+/// view of the bytes there instead of a constant buffer view (`VICTORY_PORT_CBV_SLOT=0`: not).
+/// Every program that reads the slot must read it so; [`constant_reads`] counts those that do not.
+pub fn constants_own_slot() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    constants_raw() && raw_views() == 0 && *ON.get_or_init(|| std::env::var("VICTORY_PORT_CBV_SLOT").map_or(true, |v| v.trim() != "0"))
+}
+
+thread_local! {
+    /// Of the program being translated on this thread: tables' constant buffers read raw
+    /// through their own slot, and read as constant buffers ([`constants_own_slot`]).
+    pub(crate) static CONSTANT_SITES: std::cell::Cell<(u32, u32)> = const { std::cell::Cell::new((0, 0)) };
+}
+
+/// So far: reads of tables' constant buffers made raw, kept as constant buffers, and programs
+/// with both ([`constants_own_slot`]; diagnostics).
+pub static CONSTANT_READS: [std::sync::atomic::AtomicU64; 3] = [const { std::sync::atomic::AtomicU64::new(0) }; 3];
+
+/// Takes this thread's counts of the program just translated: `(raw, kept)`.
+pub fn take_constant_sites() -> (u32, u32) {
+    let sites = CONSTANT_SITES.replace((0, 0));
+    use std::sync::atomic::Ordering::Relaxed;
+    // (Programs that read them both ways; the sites are counted where they are.)
+    if sites.0 != 0 && sites.1 != 0 {
+        CONSTANT_READS[2].fetch_add(1, Relaxed);
+    }
+    sites
+}
+
 /// Renderer port 5 (`VICTORY_PORT_CBV=1`; off by default): constant buffers are read as raw
 /// bytes, a table's through the raw twin of its slot ([`raw_views`]), a root one as a root SRV,
 /// so the host can give the card the title's bytes where they are (16-byte aligned, which a

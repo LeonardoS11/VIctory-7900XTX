@@ -6806,7 +6806,25 @@ impl<'a> Lower<'a> {
             let at = self.begin_guarded(Some(other));
             // (Renderer port 5: the twin of a constant buffer's slot is a
             // raw view of its bytes, read as one.)
-            let as_raw = super::shader::constants_raw() && super::shader::raw_views() != 0;
+            // LOCAL: or, without twins, of a table's slot itself
+            // (`super::shader::constants_own_slot`).
+            let own = super::shader::constants_own_slot() && {
+                let (x, scalar) = (self.x, &self.scalar);
+                src.leaves().iter().all(|leaf| match leaf {
+                    Source::Loaded { load, .. } | Source::Fetched { load, .. } => scalar
+                        .get(load)
+                        .and_then(|a| x.native.layout.get(a.param))
+                        .is_some_and(|p| p.root == RootType::Table),
+                    _ => false,
+                })
+            };
+            if own {
+                super::shader::CONSTANT_READS[0].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            } else if super::shader::constants_own_slot() {
+                // (Picked from the heap, or built: a constant buffer view as before.)
+                super::shader::CONSTANT_READS[1].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            let as_raw = super::shader::constants_raw() && (super::shader::raw_views() != 0 || own);
             let h = if as_raw {
                 self.handle(site, src, false, (11, 0))?
             } else {
@@ -7414,22 +7432,41 @@ impl<'a> Lower<'a> {
             }
             return Ok(None);
         }
-        if super::shader::raw_views() == 0 {
+        // LOCAL: without twins (a capped view heap), a table's constant
+        // buffer is read raw through its own slot
+        // (`super::shader::constants_own_slot`); one picked from the heap
+        // stays a constant buffer.
+        let own = super::shader::raw_views() == 0;
+        if own && !super::shader::constants_own_slot() {
             return Ok(None);
         }
         let x = self.x;
         let scalar = &self.scalar;
-        let through_heap = src.leaves().iter().all(|leaf| match leaf {
-            Source::Loaded { load, .. } | Source::Fetched { load, .. } => scalar
-                .get(load)
-                .and_then(|a| x.native.layout.get(a.param))
-                .is_some_and(|p| matches!(p.root, RootType::Table | RootType::ResourceHeap)),
-            _ => false,
+        let root_of = |leaf: &Source| match leaf {
+            Source::Loaded { load, .. } | Source::Fetched { load, .. } => {
+                scalar.get(load).and_then(|a| x.native.layout.get(a.param)).map(|p| p.root)
+            }
+            _ => None,
+        };
+        let leaves = src.leaves();
+        let through_heap = leaves.iter().all(|leaf| {
+            root_of(leaf).is_some_and(|root| root == RootType::Table || (!own && root == RootType::ResourceHeap))
         });
         if !through_heap {
+            if own && leaves.iter().any(|leaf| root_of(leaf) == Some(RootType::Table)) {
+                let (raw, kept) = super::shader::CONSTANT_SITES.get();
+                super::shader::CONSTANT_SITES.set((raw, kept + 1));
+                super::shader::CONSTANT_READS[1].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
             return Ok(None);
         }
-        // (Raw, so `raw_twin` gives the twin's index.)
+        if own {
+            let (raw, kept) = super::shader::CONSTANT_SITES.get();
+            super::shader::CONSTANT_SITES.set((raw + 1, kept));
+            super::shader::CONSTANT_READS[0].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        // (Raw, so `raw_twin` gives the twin's index; without twins, the
+        // slot's own.)
         Ok(Some(self.handle(site, src, false, (11, 0))?))
     }
 

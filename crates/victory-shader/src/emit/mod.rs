@@ -123,7 +123,7 @@ pub use rect::rect_list_gs;
 pub use shader::{
     MEMORY_FAULTS, MEMORY_PAGES, MEMORY_READ_ONLY, ROOT_CBV_SPACE, SAMPLER_SPACE, SLOT_FAULTS, SLOT_MEMORY, SLOT_STRIDES,
     SLOT_STRIDES_BYTES, SLOT_STRIDES_COUNT, VIEW_ADDRESSES, USER_DATA_SPACE, VIEW_INTEGER, VIEW_SIGNED, VIEW_STRIDE_BITS, USER_DISPATCH_THREADS_X, USER_MEMORY_BASE, USER_ROOT_ADDRESS, USER_VIEW_ADDRESS, USER_VIEW_BIAS,
-    constants_raw, raw_views, set_raw_views, set_view_heap_limit, view_heap_limit,
+    CONSTANT_READS, constants_own_slot, constants_raw, raw_views, set_raw_views, set_view_heap_limit, take_constant_sites, view_heap_limit,
 };
 
 /// The loop limit without an override: 2^20.
@@ -399,15 +399,23 @@ pub struct UserData {
 /// a program: with that on for every program, 69 compute programs that
 /// already translated came out changed (`CS_RaytracingResolve`, ...).
 pub fn translate(container: &[u8]) -> Result<HostShader, ShaderError> {
-    match translate_plain(container) {
+    // LOCAL: this program's reads of tables' constant buffers are counted
+    // from here (`shader::constants_own_slot`).
+    shader::CONSTANT_SITES.set((0, 0));
+    let out = match translate_plain(container) {
         Err(ShaderError::Unsupported { what, .. }) if what == lower::FIRST_HALF => {
+            shader::CONSTANT_SITES.set((0, 0));
             lower::with_first_half_pairs(|| translate_plain(container))
         }
         Err(ShaderError::Unsupported { what, .. }) if what == lower::MASK_ELSEWHERE => {
             lower::with_mask_ops_on_numbers(|| translate_plain(container))
         }
         other => other,
+    };
+    if out.is_ok() {
+        shader::take_constant_sites();
     }
+    out
 }
 
 fn translate_plain(container: &[u8]) -> Result<HostShader, ShaderError> {

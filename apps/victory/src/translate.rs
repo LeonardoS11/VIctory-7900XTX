@@ -376,6 +376,16 @@ pub fn run(
         "             {} emitted of {} mesh programs; {} validated, {} pipelines",
         t.ms_emitted, t.ms_programs, t.ms_validated, t.ms_pipelines
     );
+    if victory_shader::emit::constants_own_slot() {
+        use std::sync::atomic::Ordering::Relaxed;
+        let c = &victory_shader::emit::CONSTANT_READS;
+        println!(
+            "tables' constant buffers (VICTORY_PORT_CBV, own slot): {} reads made raw, {} kept as constant buffers, {} programs with both",
+            c[0].load(Relaxed),
+            c[1].load(Relaxed),
+            c[2].load(Relaxed)
+        );
+    }
     if !pairs.is_empty() {
         let host = Host::new(false).map_err(anyhow::Error::msg)?;
         let kept = lock(&kept);

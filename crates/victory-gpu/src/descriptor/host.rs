@@ -3093,6 +3093,37 @@ impl HostHeap {
             BufferLocation: gpu,
             SizeInBytes: constant_bytes(size),
         };
+        // LOCAL: without twins, translated shaders read a table's constant
+        // buffer as raw bytes through the slot itself
+        // (`victory_shader::emit::constants_own_slot`): a raw view of the
+        // copy, not a constant buffer view.
+        if victory_shader::emit::constants_own_slot() {
+            // SAFETY: a live buffer that holds the range.
+            let first = (gpu - unsafe { buffer.GetGPUVirtualAddress() }) / 4;
+            let raw = D3D12_SHADER_RESOURCE_VIEW_DESC {
+                Format: DXGI_FORMAT_R32_TYPELESS,
+                ViewDimension: D3D12_SRV_DIMENSION_BUFFER,
+                Shader4ComponentMapping: D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+                Anonymous: D3D12_SHADER_RESOURCE_VIEW_DESC_0 {
+                    Buffer: D3D12_BUFFER_SRV {
+                        FirstElement: first,
+                        NumElements: desc.SizeInBytes / 4,
+                        StructureByteStride: 0,
+                        Flags: D3D12_BUFFER_SRV_FLAG_RAW,
+                    },
+                },
+            };
+            if desc.SizeInBytes == 0 {
+                null_buffer_view(self.at(index));
+            } else {
+                // SAFETY: a slot of our heap; the range lies in the live buffer.
+                unsafe { host.device.CreateShaderResourceView(buffer, Some(&raw), self.at(index)) };
+            }
+            self.put(index);
+            self.twin_made(index, false);
+            self.keep(index, holds.then(|| buffer.clone()));
+            return;
+        }
         // SAFETY: a slot of our heap; the memory is the caller's.
         unsafe {
             host.device
@@ -3143,9 +3174,15 @@ impl HostHeap {
             }
         };
         let Some(host) = host() else { return false };
-        let Some(twin) = self.twin(index) else {
-            why(0, format_args!("slot {index} has no twin"));
-            return false;
+        // LOCAL: without twins the raw view goes into the slot itself.
+        let own = victory_shader::emit::constants_own_slot();
+        let twin = match self.twin(index) {
+            Some(twin) => twin,
+            None if own => self.at(index),
+            None => {
+                why(0, format_args!("slot {index} has no twin"));
+                return false;
+            }
         };
         // SAFETY: a live buffer.
         let (base, width) = unsafe { (buffer.GetGPUVirtualAddress(), buffer.GetDesc().Width) };
@@ -3177,6 +3214,14 @@ impl HostHeap {
         let cbv = if cbv.SizeInBytes == 0 { D3D12_CONSTANT_BUFFER_VIEW_DESC::default() } else { cbv };
         // SAFETY: slots of our heaps; the ranges lie in the live buffer (a
         // zero location makes a null constant buffer view).
+        if own {
+            // SAFETY: a slot of our heap; the range lies in the live buffer.
+            unsafe { host.device.CreateShaderResourceView(buffer, Some(&raw), twin) };
+            self.put(index);
+            self.twin_made(index, false);
+            self.keep(index, Some(buffer.clone()));
+            return true;
+        }
         unsafe {
             host.device.CreateConstantBufferView(Some(&cbv), self.at(index));
             self.put(index);
