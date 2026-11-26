@@ -3548,6 +3548,19 @@ impl State {
                     // Made, repeats of this frame, of the frame before, of older ones; slots made.
                     static COUNTS: [AtomicU64; 5] = [const { AtomicU64::new(0) }; 5];
                     let frame = crate::frame::current();
+                    // The same without the constant buffers' records (their
+                    // addresses move with the title's ring of constants).
+                    let key = {
+                        let mut h = RecordHash::default();
+                        for k in 0..n {
+                            if entries().any(|u| u.table_offset_dwords / 8 == k && u.kind == ResourceType::Cbv) {
+                                continue;
+                            }
+                            // SAFETY: a descriptor slot in title memory.
+                            h.add(unsafe { ((table + u64::from(k) * 32) as *const [u32; 3]).read_unaligned() });
+                        }
+                        (table, n, h.0)
+                    };
                     let before = SEEN.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).insert(key, frame);
                     let made = COUNTS[0].fetch_add(1, Ordering::Relaxed) + 1;
                     COUNTS[4].fetch_add(u64::from(n), Ordering::Relaxed);
