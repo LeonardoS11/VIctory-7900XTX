@@ -3134,11 +3134,23 @@ impl HostHeap {
     /// null one. Whether the twin was made (`false`: the caller copies the
     /// bytes as before).
     pub(crate) fn constant_raw_at(&self, index: u32, buffer: &ID3D12Resource, gpu: u64, size: u32) -> bool {
+        // LOCAL diagnostics: why a constant buffer is not given raw.
+        static WHY: [std::sync::atomic::AtomicU64; 4] = [const { std::sync::atomic::AtomicU64::new(0) }; 4];
+        let why = |i: usize, text: std::fmt::Arguments<'_>| {
+            let n = WHY[i].fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            if n.is_power_of_two() && n <= 1 << 20 {
+                tracing::info!("renderer port 5: not raw ({n} times): {text}");
+            }
+        };
         let Some(host) = host() else { return false };
-        let Some(twin) = self.twin(index) else { return false };
+        let Some(twin) = self.twin(index) else {
+            why(0, format_args!("slot {index} has no twin"));
+            return false;
+        };
         // SAFETY: a live buffer.
         let (base, width) = unsafe { (buffer.GetGPUVirtualAddress(), buffer.GetDesc().Width) };
         let Some(offset) = gpu.checked_sub(base).filter(|&o| o < width && crate::port_cbv::raw_ok(o)) else {
+            why(1, format_args!("gpu {gpu:#x} base {base:#x} width {width:#x} size {size:#x}"));
             return false;
         };
         let bytes = u64::from(constant_bytes(size)).min(width - offset) & !3;
