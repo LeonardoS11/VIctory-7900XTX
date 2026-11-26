@@ -3553,7 +3553,7 @@ impl State {
                     let key = {
                         let mut h = RecordHash::default();
                         for k in 0..n {
-                            if entries().any(|u| u.table_offset_dwords / 8 == k && u.kind == ResourceType::Cbv) {
+                            if entries.iter().any(|u| u.table_offset_dwords / 8 == k && u.kind == ResourceType::Cbv) {
                                 continue;
                             }
                             // SAFETY: a descriptor slot in title memory.
@@ -3660,8 +3660,29 @@ impl State {
                         // Renderer port 5: title memory in place is the
                         // card's to read where it is; nothing is copied.
                         if crate::port_cbv::in_place_on() {
-                            match crate::shadow::find(address, u64::from(size)).filter(|s| s.in_place()) {
+                            // LOCAL: or a copy in the card's memory
+                            // (`VICTORY_PORT_CBV_CARD=0`: not), brought up
+                            // to date when the list is submitted as every
+                            // buffer view's is. On a card that reads the
+                            // PC's memory slowly (NVIDIA) nothing is in
+                            // place, and the copies are what it reads.
+                            let carded = |s: &std::sync::Arc<crate::shadow::Shadow>| {
+                                static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+                                s.carded() && *ON.get_or_init(|| std::env::var_os("VICTORY_PORT_CBV_CARD").is_none_or(|v| v != "0"))
+                            };
+                            match crate::shadow::find(address, u64::from(size)).filter(|s| s.in_place() || carded(s)) {
                                 Some(shadow) => {
+                                    if !shadow.in_place() {
+                                        // By blocks of 64 KiB: the constants
+                                        // of a list lie beside one another in
+                                        // the title's ring, and a refresh of
+                                        // its own for each of the 9,000 a
+                                        // frame cost more than their copies
+                                        // did (preparing 26 -> 34 ms).
+                                        let from = (address & !0xffff).max(shadow.span().0);
+                                        let to = (address + u64::from(size)).next_multiple_of(0x1_0000);
+                                        shadow.refresh(list, from, to - from);
+                                    }
                                     if host.constant_raw_at(index, &shadow.buffer, shadow.gpu(address), size) {
                                         crate::port_cbv::in_place(size);
                                         continue;
