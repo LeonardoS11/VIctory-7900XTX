@@ -49,11 +49,23 @@ pub fn title_memory_reserved(at: usize, len: usize, protect: u32) {
     RESERVATIONS.lock().unwrap_or_else(|e| e.into_inner()).insert(at, (len, protect));
 }
 
+/// The smallest host copy whose pieces are left on the card
+/// (`VICTORY_SKIP_WC_BACK_MIN_KB`, 1024): with every title buffer in the
+/// card's memory (`VICTORY_CARD_BUFFERS_MIN_KB=64`) the small ones hold
+/// what the title's CPU does read (counts, lists of what is seen), and a
+/// run that left those on the card drew half the frame, black.
+fn least() -> u64 {
+    static LEAST: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *LEAST.get_or_init(|| {
+        std::env::var("VICTORY_SKIP_WC_BACK_MIN_KB").ok().and_then(|v| v.trim().parse::<u64>().ok()).unwrap_or(1024) << 10
+    })
+}
+
 /// Whether the piece `[from, to)` of title memory, which shaders wrote on
-/// the card, is left there.
-pub(crate) fn skip(from: usize, to: usize) -> bool {
+/// the card in a host copy of `copy` bytes, is left there.
+pub(crate) fn skip(from: usize, to: usize, copy: u64) -> bool {
     let mode = mode();
-    if mode == 0 || from >= to {
+    if mode == 0 || from >= to || copy < least() {
         return false;
     }
     let combined = RESERVATIONS.lock().unwrap_or_else(|e| e.into_inner()).range(..to).next_back().is_some_and(

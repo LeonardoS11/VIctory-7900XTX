@@ -4839,7 +4839,7 @@ impl Host {
                             let key = (r.shadow.id(), r.shadow.span().0 as usize + lo, hi - lo);
                             // Experiment: write-combined title memory keeps
                             // what shaders wrote on the card only.
-                            if crate::wcback::skip(key.1, key.1 + key.2) {
+                            if crate::wcback::skip(key.1, key.1 + key.2, r.shadow.span().1) {
                                 seen.insert((copy, lo, hi));
                                 continue;
                             }
@@ -5217,7 +5217,7 @@ impl Host {
                 let (lo, hi) = r.shadow.card_piece(&r.span, p);
                 if lo < hi && seen.insert((std::sync::Arc::as_ptr(&r.shadow) as usize, lo, hi)) {
                     let title = r.shadow.span().0 as usize;
-                    if crate::wcback::skip(title + lo, title + hi) {
+                    if crate::wcback::skip(title + lo, title + hi, r.shadow.span().1) {
                         continue;
                     }
                     pieces.push((i, lo, hi, total));
